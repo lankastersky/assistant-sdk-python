@@ -17,13 +17,12 @@
 import array
 import logging
 import math
-import time
 import threading
+import time
 import wave
 
 import click
 import sounddevice as sd
-
 
 DEFAULT_AUDIO_SAMPLE_RATE = 16000
 DEFAULT_AUDIO_SAMPLE_WIDTH = 2
@@ -48,12 +47,12 @@ def normalize_audio_buffer(buf, volume_percentage, sample_width=2):
     """
     if sample_width != 2:
         raise Exception('unsupported sample width:', sample_width)
-    scale = math.pow(2, 1.0*volume_percentage/100)-1
+    scale = math.pow(2, 1.0 * volume_percentage / 100) - 1
     # Construct array from bytes based on sample_width, multiply by scale
     # and convert it back to bytes
     arr = array.array('h', buf)
     for idx in range(0, len(arr)):
-        arr[idx] = int(arr[idx]*scale)
+        arr[idx] = int(arr[idx] * scale)
     buf = arr.tostring()
     return buf
 
@@ -77,6 +76,7 @@ class WaveSource(object):
       sample_rate: sample rate in hertz.
       sample_width: size of a single sample in bytes.
     """
+
     def __init__(self, fp, sample_rate, sample_width):
         self._fp = fp
         try:
@@ -139,6 +139,7 @@ class WaveSink(object):
       sample_rate: sample rate in hertz.
       sample_width: size of a single sample in bytes.
     """
+
     def __init__(self, fp, sample_rate, sample_width):
         self._fp = fp
         self._wavep = wave.open(self._fp, 'wb')
@@ -180,6 +181,7 @@ class SoundDeviceStream(object):
       block_size: size in bytes of each read and write operation.
       flush_size: size in bytes of silence data written during flush operation.
     """
+
     def __init__(self, sample_rate, sample_width, block_size, flush_size):
         if sample_width == 2:
             audio_format = 'int16'
@@ -187,7 +189,8 @@ class SoundDeviceStream(object):
             raise Exception('unsupported sample width:', sample_width)
         self._audio_stream = sd.RawStream(
             samplerate=sample_rate, dtype=audio_format, channels=1,
-            blocksize=int(block_size/2),  # blocksize is in number of frames.
+            blocksize=int(block_size / 2),
+            # blocksize is in number of frames.
         )
         self._block_size = block_size
         self._flush_size = flush_size
@@ -261,6 +264,7 @@ class ConversationStream(object):
       iter_size: read size in bytes for each iteration.
       sample_width: size of a single sample in bytes.
     """
+
     def __init__(self, source, sink, iter_size, sample_width):
         self._source = source
         self._sink = sink
@@ -370,7 +374,7 @@ class ConversationStream(object):
               help=('Size of silence data in bytes written '
                     'during flush operation'))
 def main(record_time, audio_sample_rate, audio_sample_width,
-         audio_iter_size, audio_block_size, audio_flush_size):
+    audio_iter_size, audio_block_size, audio_flush_size):
     """Helper command to test audio stream processing.
 
     - Record 5 seconds of 16-bit samples at 16khz.

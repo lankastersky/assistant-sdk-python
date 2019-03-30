@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """Helper functions for the Google Assistant API."""
 
 import logging
@@ -27,8 +26,7 @@ def log_assist_request_without_audio(assist_request):
         if len(resp_copy.audio_in) > 0:
             size = len(resp_copy.audio_in)
             resp_copy.ClearField('audio_in')
-            logging.debug('AssistRequest: audio_in (%d bytes)',
-                          size)
+            logging.debug('AssistRequest: audio_in (%d bytes)', size)
             return
         logging.debug('AssistRequest: %s', resp_copy)
 
@@ -38,8 +36,9 @@ def log_assist_response_without_audio(assist_response):
     if logging.getLogger().isEnabledFor(logging.DEBUG):
         resp_copy = embedded_assistant_pb2.AssistResponse()
         resp_copy.CopyFrom(assist_response)
-        has_audio_data = (resp_copy.HasField('audio_out') and
-                          len(resp_copy.audio_out.audio_data) > 0)
+        has_audio_data = (
+            resp_copy.HasField('audio_out') and
+            len(resp_copy.audio_out.audio_data) > 0)
         if has_audio_data:
             size = len(resp_copy.audio_out.audio_data)
             resp_copy.audio_out.ClearField('audio_data')
@@ -48,7 +47,6 @@ def log_assist_response_without_audio(assist_response):
                               resp_copy,
                               size)
             else:
-                logging.debug('AssistResponse: audio_data (%d bytes)',
-                              size)
+                logging.debug('AssistResponse: audio_data (%d bytes)', size)
             return
         logging.debug('AssistResponse: %s', resp_copy)

@@ -19,9 +19,9 @@ import logging
 import os
 
 import click
-import google.oauth2.credentials
-import google.auth.transport.requests
 
+import google.auth.transport.requests
+import google.oauth2.credentials
 
 ASSISTANT_API_VERSION = 'v1alpha2'
 logging.basicConfig(format='', level=logging.INFO)
@@ -86,25 +86,25 @@ def pretty_print_device(device):
 @click.group()
 @click.option('--project-id', required=True,
               help='Enter the Google Developer Project ID that you want to '
-              'use with the registration tool. If you don\'t use this flag, '
-              'the tool will use the project listed in the '
-              'client_secret_<client-id>.json file you specify with the '
-              '--client-secrets flag.')
+                   'use with the registration tool. If you don\'t use this flag, '
+                   'the tool will use the project listed in the '
+                   'client_secret_<client-id>.json file you specify with the '
+                   '--client-secrets flag.')
 @click.option('--verbose', flag_value=True,
               help='Shows detailed JSON response')
 @click.option('--api-endpoint', default='embeddedassistant.googleapis.com',
               show_default=True,
               help='Hostname for the Google Assistant API. Do not use this '
-              'flag unless explicitly instructed.')
+                   'flag unless explicitly instructed.')
 @click.option('--credentials', show_default=True,
               default=os.path.join(click.get_app_dir('google-oauthlib-tool'),
                                    'credentials.json'),
               help='File location of the generated credentials file. The '
-              'google-oauthlib-tool generates this file after authorizing '
-              'the user with the client_secret_<client-id>.json file. This '
-              'credentials file authorizes access to the Google Assistant '
-              'API. You can use this flag if the credentials were generated '
-              'in a location that is different than the default.')
+                   'google-oauthlib-tool generates this file after authorizing '
+                   'the user with the client_secret_<client-id>.json file. This '
+                   'credentials file authorizes access to the Google Assistant '
+                   'API. You can use this flag if the credentials were generated '
+                   'in a location that is different than the default.')
 @click.pass_context
 def cli(ctx, project_id, verbose, api_endpoint, credentials):
     try:
@@ -129,44 +129,44 @@ def cli(ctx, project_id, verbose, api_endpoint, credentials):
 @cli.command()
 @click.option('--model', required=True,
               help='Enter a globally-unique identifier for this device model; '
-              'you should use your project ID as a prefix to help avoid '
-              'collisions over the range of all projects (for example, '
-              '"my-dev-project-my-led1").')
+                   'you should use your project ID as a prefix to help avoid '
+                   'collisions over the range of all projects (for example, '
+                   '"my-dev-project-my-led1").')
 @click.option('--type', type=click.Choice(['LIGHT', 'SWITCH', 'OUTLET']),
               required=True,
               help='Select the type of device hardware that best aligns with '
-              'your device. Select LIGHT if none of the listed choices aligns '
-              'with your device.')
+                   'your device. Select LIGHT if none of the listed choices aligns '
+                   'with your device.')
 @click.option('--trait', multiple=True,
               help='Add traits (abilities) that the device supports. Pass '
-              'this flag multiple times to create a list of traits. Refer to '
-              'https://developers.google.com/assistant/sdk/reference/traits/ '
-              'for a list of supported traits.')
+                   'this flag multiple times to create a list of traits. Refer to '
+                   'https://developers.google.com/assistant/sdk/reference/traits/ '
+                   'for a list of supported traits.')
 @click.option('--manufacturer', required=True,
               help='Enter the manufacturer\'s name in this field (for '
-              'example, "Assistant SDK developer"). This information may be '
-              'shown in the Assistant settings and internal analytics.')
+                   'example, "Assistant SDK developer"). This information may be '
+                   'shown in the Assistant settings and internal analytics.')
 @click.option('--product-name', required=True,
               help='Enter the product name in this field (for example, '
-              '"Assistant SDK light").')
+                   '"Assistant SDK light").')
 @click.option('--description',
               help='Enter a description of the product in this field (for '
-              'example, "Assistant SDK light device").')
+                   'example, "Assistant SDK light device").')
 @click.option('--device', required=True,
               help='Enter an identifier for the device instance. This ID must '
-              'be unique within all of the devices registered under the same '
-              'Google Developer project.')
+                   'be unique within all of the devices registered under the same '
+                   'Google Developer project.')
 @click.option('--nickname',
               help='Enter a nickname for the device. You can use this name '
-              'when talking to your Assistant to refer to this device.')
+                   'when talking to your Assistant to refer to this device.')
 @click.option('--client-type', type=click.Choice(['SERVICE', 'LIBRARY']),
               required=True,
               help='Select the type of the client. Use SERVICE if using '
-              'the Google Assistant Service or LIBRARY if using '
-              'the Google Assistant Library.')
+                   'the Google Assistant Service or LIBRARY if using '
+                   'the Google Assistant Library.')
 @click.pass_context
 def register(ctx, model, type, trait, manufacturer, product_name, description,
-             device, nickname, client_type):
+    device, nickname, client_type):
     """Registers a device model and instance.
 
     Device model fields can only contain letters, numbers, and the following
@@ -195,32 +195,32 @@ def register(ctx, model, type, trait, manufacturer, product_name, description,
 @cli.command('register-model')
 @click.option('--model', required=True,
               help='Enter a globally-unique identifier for this device model; '
-              'you should use your project ID as a prefix to help avoid '
-              'collisions over the range of all projects (for example, '
-              '"my-dev-project-my-led1").')
+                   'you should use your project ID as a prefix to help avoid '
+                   'collisions over the range of all projects (for example, '
+                   '"my-dev-project-my-led1").')
 @click.option('--type', type=click.Choice(['LIGHT', 'SWITCH', 'OUTLET']),
               required=True,
               help='Select the type of device hardware that best aligns with '
-              'your device. Select LIGHT if none of the listed choices aligns '
-              'with your device.')
+                   'your device. Select LIGHT if none of the listed choices aligns '
+                   'with your device.')
 @click.option('--trait', multiple=True,
               help='Add traits (abilities) that the device supports. Pass '
-              'this flag multiple times to create a list of traits. Refer to '
-              'https://developers.google.com/assistant/sdk/reference/traits/ '
-              'for a list of supported traits.')
+                   'this flag multiple times to create a list of traits. Refer to '
+                   'https://developers.google.com/assistant/sdk/reference/traits/ '
+                   'for a list of supported traits.')
 @click.option('--manufacturer', required=True,
               help='Enter the manufacturer\'s name in this field (for '
-              'example, "Assistant SDK developer"). This information may be '
-              'shown in the Assistant settings and internal analytics.')
+                   'example, "Assistant SDK developer"). This information may be '
+                   'shown in the Assistant settings and internal analytics.')
 @click.option('--product-name', required=True,
               help='Enter the product name in this field (for example, '
-              '"Assistant SDK light").')
+                   '"Assistant SDK light").')
 @click.option('--description',
               help='Enter a description of the product in this field (for '
-              'example, "Assistant SDK light device").')
+                   'example, "Assistant SDK light device").')
 @click.pass_context
 def register_model(ctx, model, type, trait,
-                   manufacturer, product_name, description):
+    manufacturer, product_name, description):
     """Registers a device model.
 
     Device model fields can only contain letters, numbers, and the following
@@ -263,22 +263,22 @@ def register_model(ctx, model, type, trait,
 @cli.command('register-device')
 @click.option('--device', required=True,
               help='Enter an identifier for a device instance. If the device '
-              'ID already exists, this command will update the device '
-              'instance. If it does not exist, this command will create '
-              'a new device instance. This ID must be unique within all '
-              'of the devices registered under the same Google Developer '
-              'project.')
+                   'ID already exists, this command will update the device '
+                   'instance. If it does not exist, this command will create '
+                   'a new device instance. This ID must be unique within all '
+                   'of the devices registered under the same Google Developer '
+                   'project.')
 @click.option('--model', required=True,
               help='Enter the identifier for an existing device model. This '
-              'new device instance will be associated with this device model.')
+                   'new device instance will be associated with this device model.')
 @click.option('--nickname',
               help='Enter a nickname for the device. You can use this name '
-              'when talking to your Assistant to refer to this device.')
+                   'when talking to your Assistant to refer to this device.')
 @click.option('--client-type', required=True,
               type=click.Choice(['SERVICE', 'LIBRARY']),
               help='Select the type of the client. Use SERVICE if using '
-              'the Google Assistant Service or LIBRARY if using '
-              'the Google Assistant Library.')
+                   'the Google Assistant Service or LIBRARY if using '
+                   'the Google Assistant Library.')
 @click.pass_context
 def register_device(ctx, device, model, nickname, client_type):
     """Registers a device instance under an existing device model.

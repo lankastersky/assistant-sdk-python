@@ -20,6 +20,7 @@ ASSISTANT_HTML_FILE = 'google-assistant-sdk-screen-out.html'
 
 
 class SystemBrowser(object):
+
     def __init__(self):
         self.tempdir = tempfile.mkdtemp()
         self.filename = os.path.join(self.tempdir, ASSISTANT_HTML_FILE)

@@ -14,10 +14,10 @@
 
 """Helper functions for the Device Actions."""
 
-import concurrent.futures
 import logging
 import sys
 
+import concurrent.futures
 
 key_inputs_ = 'inputs'
 key_intent_ = 'intent'
@@ -62,8 +62,10 @@ class DeviceRequestHandler(object):
 
     def command(self, intent):
         """Register a device action handlers."""
+
         def decorator(fn):
             self.handlers[intent] = fn
+
         return decorator
 
     def submit_commands(self, devices, execution):

@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """Sample that implements a gRPC client for the Google Assistant API."""
 
 import concurrent.futures
@@ -20,8 +19,13 @@ import logging
 import os
 import os.path
 import pathlib2 as pathlib
+from pyquery import PyQuery
+import random
+import requests
+import simplejson
 import sys
 import time
+import threading
 import uuid
 
 import click
@@ -30,25 +34,23 @@ import google.auth.transport.grpc
 import google.auth.transport.requests
 import google.oauth2.credentials
 
-from google.assistant.embedded.v1alpha2 import (
-    embedded_assistant_pb2,
-    embedded_assistant_pb2_grpc
-)
+from google.assistant.embedded.v1alpha2 import (embedded_assistant_pb2,
+                                                embedded_assistant_pb2_grpc)
 from tenacity import retry, stop_after_attempt, retry_if_exception
 
 try:
-    from . import (
-        assistant_helpers,
-        audio_helpers,
-        browser_helpers,
-        device_helpers
-    )
+    from . import (assistant_helpers, audio_helpers, browser_helpers,
+                   device_helpers, hotword_assistant, image_search,
+                   youtube_service)
 except (SystemError, ImportError):
     import assistant_helpers
     import audio_helpers
     import browser_helpers
     import device_helpers
 
+from hotword_assistant import HotwordAssistant
+from image_search import ImageSearch
+from youtube_service import YouTubeSearchService
 
 ASSISTANT_API_ENDPOINT = 'embeddedassistant.googleapis.com'
 END_OF_UTTERANCE = embedded_assistant_pb2.AssistResponse.END_OF_UTTERANCE
@@ -61,20 +63,20 @@ DEFAULT_GRPC_DEADLINE = 60 * 3 + 5
 class SampleAssistant(object):
     """Sample Assistant that supports conversations and device actions.
 
-    Args:
-      device_model_id: identifier of the device model.
-      device_id: identifier of the registered device instance.
-      conversation_stream(ConversationStream): audio stream
-        for recording query and playing back assistant answer.
-      channel: authorized gRPC channel for connection to the
-        Google Assistant API.
-      deadline_sec: gRPC deadline in seconds for Google Assistant API call.
-      device_handler: callback for device actions.
+      Args:
+        device_model_id: identifier of the device model.
+        device_id: identifier of the registered device instance.
+        conversation_stream(ConversationStream): audio stream for recording query
+          and playing back assistant answer.
+        channel: authorized gRPC channel for connection to the Google Assistant
+          API.
+        deadline_sec: gRPC deadline in seconds for Google Assistant API call.
+        device_handler: callback for device actions.
     """
 
     def __init__(self, language_code, device_model_id, device_id,
-                 conversation_stream, display,
-                 channel, deadline_sec, device_handler):
+        conversation_stream, display, channel, deadline_sec,
+        device_handler):
         self.language_code = language_code
         self.device_model_id = device_model_id
         self.device_id = device_id
@@ -93,8 +95,7 @@ class SampleAssistant(object):
 
         # Create Google Assistant API gRPC client.
         self.assistant = embedded_assistant_pb2_grpc.EmbeddedAssistantStub(
-            channel
-        )
+            channel)
         self.deadline = deadline_sec
 
         self.device_handler = device_handler
@@ -114,13 +115,15 @@ class SampleAssistant(object):
             return True
         return False
 
-    @retry(reraise=True, stop=stop_after_attempt(3),
-           retry=retry_if_exception(is_grpc_error_unavailable))
+    @retry(
+        reraise=True,
+        stop=stop_after_attempt(3),
+        retry=retry_if_exception(is_grpc_error_unavailable))
     def assist(self):
         """Send a voice request to the Assistant and playback the response.
 
-        Returns: True if conversation should continue.
-        """
+            Returns: True if conversation should continue.
+            """
         continue_conversation = False
         device_actions_futures = []
 
@@ -133,6 +136,7 @@ class SampleAssistant(object):
                 yield c
             logging.debug('Reached end of AssistRequest iteration.')
 
+        last_request = None
         # This generator yields AssistResponse proto messages
         # received from the gRPC Google Assistant API.
         for resp in self.assistant.Assist(iter_log_assist_requests(),
@@ -142,39 +146,69 @@ class SampleAssistant(object):
                 logging.info('End of audio request detected.')
                 logging.info('Stopping recording.')
                 self.conversation_stream.stop_recording()
+
             if resp.speech_results:
-                logging.info('Transcript of user request: "%s".',
-                             ' '.join(r.transcript
-                                      for r in resp.speech_results))
+                last_request = ' '.join(
+                    r.transcript for r in resp.speech_results)
+                logging.info('Transcript of user request: "%s".', last_request)
+
             if len(resp.audio_out.audio_data) > 0:
                 if not self.conversation_stream.playing:
                     self.conversation_stream.stop_recording()
                     self.conversation_stream.start_playback()
                     logging.info('Playing assistant response.')
                 self.conversation_stream.write(resp.audio_out.audio_data)
+
             if resp.dialog_state_out.conversation_state:
                 conversation_state = resp.dialog_state_out.conversation_state
                 logging.debug('Updating conversation state.')
                 self.conversation_state = conversation_state
+
             if resp.dialog_state_out.volume_percentage != 0:
                 volume_percentage = resp.dialog_state_out.volume_percentage
                 logging.info('Setting volume to %s%%', volume_percentage)
                 self.conversation_stream.volume_percentage = volume_percentage
+
             if resp.dialog_state_out.microphone_mode == DIALOG_FOLLOW_ON:
                 continue_conversation = True
                 logging.info('Expecting follow-on query from user.')
+
             elif resp.dialog_state_out.microphone_mode == CLOSE_MICROPHONE:
                 continue_conversation = False
+
             if resp.device_action.device_request_json:
                 device_request = json.loads(
-                    resp.device_action.device_request_json
-                )
+                    resp.device_action.device_request_json)
+                logging.info('Device request: %s', device_request)
                 fs = self.device_handler(device_request)
+
                 if fs:
                     device_actions_futures.extend(fs)
+
             if self.display and resp.screen_out.data:
+
+                if len(device_actions_futures):
+                    # Custom device actions triggered. Ignore the response from Assistant
+                    continue
+
+                # Showing data from the assistant (for big screens)
                 system_browser = browser_helpers.system_browser
-                system_browser.display(resp.screen_out.data)
+                html = resp.screen_out.data.decode('utf-8')
+                system_browser.display(html.encode('utf-8'))
+
+                # # Showing formatted data for mobile devices
+                # if last_request:
+                #     # Showing asynchronously
+                #     threading.Thread(
+                #         target=self.display_preview,
+                #         args=[last_request]).start()
+                #     # Showing synchronously (can be slow)
+                #     # self.display_preview(last_request)
+                #     last_request = None
+
+            if resp.dialog_state_out.supplemental_display_text:
+                text_response = resp.dialog_state_out.supplemental_display_text
+                logging.info('Supplemental text: %s', text_response)
 
         if len(device_actions_futures):
             logging.info('Waiting for device executions to complete.')
@@ -205,8 +239,7 @@ class SampleAssistant(object):
             device_config=embedded_assistant_pb2.DeviceConfig(
                 device_id=self.device_id,
                 device_model_id=self.device_model_id,
-            )
-        )
+            ))
         if self.display:
             config.screen_out_config.screen_mode = PLAYING
         # Continue current conversation with later requests.
@@ -218,109 +251,145 @@ class SampleAssistant(object):
             # Subsequent requests need audio data, but not config.
             yield embedded_assistant_pb2.AssistRequest(audio_in=data)
 
+    def display_preview(self, query):
+        # TODO
+        pass
 
 @click.command()
-@click.option('--api-endpoint', default=ASSISTANT_API_ENDPOINT,
-              metavar='<api endpoint>', show_default=True,
-              help='Address of Google Assistant API service.')
-@click.option('--credentials',
-              metavar='<credentials>', show_default=True,
-              default=os.path.join(click.get_app_dir('google-oauthlib-tool'),
-                                   'credentials.json'),
-              help='Path to read OAuth2 credentials.')
-@click.option('--project-id',
-              metavar='<project id>',
-              help=('Google Developer Project ID used for registration '
-                    'if --device-id is not specified'))
-@click.option('--device-model-id',
-              metavar='<device model id>',
-              help=(('Unique device model identifier, '
-                     'if not specifed, it is read from --device-config')))
-@click.option('--device-id',
-              metavar='<device id>',
-              help=(('Unique registered device instance identifier, '
-                     'if not specified, it is read from --device-config, '
-                     'if no device_config found: a new device is registered '
-                     'using a unique id and a new device config is saved')))
-@click.option('--device-config', show_default=True,
-              metavar='<device config>',
-              default=os.path.join(
-                  click.get_app_dir('googlesamples-assistant'),
-                  'device_config.json'),
-              help='Path to save and restore the device configuration')
-@click.option('--lang', show_default=True,
-              metavar='<language code>',
-              default='en-US',
-              help='Language code of the Assistant')
-@click.option('--display', is_flag=True, default=False,
-              help='Enable visual display of Assistant responses in HTML.')
-@click.option('--verbose', '-v', is_flag=True, default=False,
-              help='Verbose logging.')
-@click.option('--input-audio-file', '-i',
-              metavar='<input file>',
-              help='Path to input audio file. '
-              'If missing, uses audio capture')
-@click.option('--output-audio-file', '-o',
-              metavar='<output file>',
-              help='Path to output audio file. '
-              'If missing, uses audio playback')
-@click.option('--audio-sample-rate',
-              default=audio_helpers.DEFAULT_AUDIO_SAMPLE_RATE,
-              metavar='<audio sample rate>', show_default=True,
-              help='Audio sample rate in hertz.')
-@click.option('--audio-sample-width',
-              default=audio_helpers.DEFAULT_AUDIO_SAMPLE_WIDTH,
-              metavar='<audio sample width>', show_default=True,
-              help='Audio sample width in bytes.')
-@click.option('--audio-iter-size',
-              default=audio_helpers.DEFAULT_AUDIO_ITER_SIZE,
-              metavar='<audio iter size>', show_default=True,
-              help='Size of each read during audio stream iteration in bytes.')
-@click.option('--audio-block-size',
-              default=audio_helpers.DEFAULT_AUDIO_DEVICE_BLOCK_SIZE,
-              metavar='<audio block size>', show_default=True,
-              help=('Block size in bytes for each audio device '
-                    'read and write operation.'))
-@click.option('--audio-flush-size',
-              default=audio_helpers.DEFAULT_AUDIO_DEVICE_FLUSH_SIZE,
-              metavar='<audio flush size>', show_default=True,
-              help=('Size of silence data in bytes written '
-                    'during flush operation'))
-@click.option('--grpc-deadline', default=DEFAULT_GRPC_DEADLINE,
-              metavar='<grpc deadline>', show_default=True,
-              help='gRPC deadline in seconds')
-@click.option('--once', default=False, is_flag=True,
-              help='Force termination after a single conversation.')
-def main(api_endpoint, credentials, project_id,
-         device_model_id, device_id, device_config,
-         lang, display, verbose,
-         input_audio_file, output_audio_file,
-         audio_sample_rate, audio_sample_width,
-         audio_iter_size, audio_block_size, audio_flush_size,
-         grpc_deadline, once, *args, **kwargs):
+@click.option(
+    '--api-endpoint',
+    default=ASSISTANT_API_ENDPOINT,
+    metavar='<api endpoint>',
+    show_default=True,
+    help='Address of Google Assistant API service.')
+@click.option(
+    '--credentials',
+    metavar='<credentials>',
+    show_default=True,
+    default=os.path.join(
+        click.get_app_dir('google-oauthlib-tool'), 'credentials.json'),
+    help='Path to read OAuth2 credentials.')
+@click.option(
+    '--project-id',
+    metavar='<project id>',
+    help=('Google Developer Project ID used for registration '
+          'if --device-id is not specified'))
+@click.option(
+    '--device-model-id',
+    metavar='<device model id>',
+    help=(('Unique device model identifier, '
+           'if not specifed, it is read from --device-config')))
+@click.option(
+    '--device-id',
+    metavar='<device id>',
+    help=(('Unique registered device instance identifier, '
+           'if not specified, it is read from --device-config, '
+           'if no device_config found: a new device is registered '
+           'using a unique id and a new device config is saved')))
+@click.option(
+    '--device-config',
+    show_default=True,
+    metavar='<device config>',
+    default=os.path.join(
+        click.get_app_dir('googlesamples-assistant'),
+        'device_config.json'),
+    help='Path to save and restore the device configuration')
+@click.option(
+    '--lang',
+    show_default=True,
+    metavar='<language code>',
+    default='en-US',
+    help='Language code of the Assistant')
+@click.option(
+    '--display',
+    is_flag=True,
+    default=False,
+    help='Enable visual display of Assistant responses in HTML.')
+@click.option(
+    '--verbose', '-v', is_flag=True, default=False, help='Verbose logging.')
+@click.option(
+    '--input-audio-file',
+    '-i',
+    metavar='<input file>',
+    help='Path to input audio file. '
+         'If missing, uses audio capture')
+@click.option(
+    '--output-audio-file',
+    '-o',
+    metavar='<output file>',
+    help='Path to output audio file. '
+         'If missing, uses audio playback')
+@click.option(
+    '--audio-sample-rate',
+    default=audio_helpers.DEFAULT_AUDIO_SAMPLE_RATE,
+    metavar='<audio sample rate>',
+    show_default=True,
+    help='Audio sample rate in hertz.')
+@click.option(
+    '--audio-sample-width',
+    default=audio_helpers.DEFAULT_AUDIO_SAMPLE_WIDTH,
+    metavar='<audio sample width>',
+    show_default=True,
+    help='Audio sample width in bytes.')
+@click.option(
+    '--audio-iter-size',
+    default=audio_helpers.DEFAULT_AUDIO_ITER_SIZE,
+    metavar='<audio iter size>',
+    show_default=True,
+    help='Size of each read during audio stream iteration in bytes.')
+@click.option(
+    '--audio-block-size',
+    default=audio_helpers.DEFAULT_AUDIO_DEVICE_BLOCK_SIZE,
+    metavar='<audio block size>',
+    show_default=True,
+    help=('Block size in bytes for each audio device '
+          'read and write operation.'))
+@click.option(
+    '--audio-flush-size',
+    default=audio_helpers.DEFAULT_AUDIO_DEVICE_FLUSH_SIZE,
+    metavar='<audio flush size>',
+    show_default=True,
+    help=('Size of silence data in bytes written '
+          'during flush operation'))
+@click.option(
+    '--grpc-deadline',
+    default=DEFAULT_GRPC_DEADLINE,
+    metavar='<grpc deadline>',
+    show_default=True,
+    help='gRPC deadline in seconds')
+@click.option(
+    '--once',
+    default=False,
+    is_flag=True,
+    help='Force termination after a single conversation.')
+def main(api_endpoint, credentials, project_id, device_model_id, device_id,
+    device_config, lang, display, verbose, input_audio_file,
+    output_audio_file, audio_sample_rate, audio_sample_width,
+    audio_iter_size, audio_block_size, audio_flush_size, grpc_deadline,
+    once, *args, **kwargs):
     """Samples for the Google Assistant API.
 
-    Examples:
-      Run the sample with microphone input and speaker output:
+      Examples:
+        Run the sample with microphone input and speaker output:
 
-        $ python -m googlesamples.assistant
+          $ python -m googlesamples.assistant
 
-      Run the sample with file input and speaker output:
+        Run the sample with file input and speaker output:
 
-        $ python -m googlesamples.assistant -i <input file>
+          $ python -m googlesamples.assistant -i <input file>
 
-      Run the sample with file input and output:
+        Run the sample with file input and output:
 
-        $ python -m googlesamples.assistant -i <input file> -o <output file>
-    """
+          $ python -m googlesamples.assistant -i <input file> -o <output file>
+      """
     # Setup logging.
     logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO)
 
     # Load OAuth 2.0 credentials.
     try:
         with open(credentials, 'r') as f:
-            credentials = google.oauth2.credentials.Credentials(token=None,
-                                                                **json.load(f))
+            credentials = google.oauth2.credentials.Credentials(
+                token=None, **json.load(f))
             http_request = google.auth.transport.requests.Request()
             credentials.refresh(http_request)
     except Exception as e:
@@ -340,32 +409,26 @@ def main(api_endpoint, credentials, project_id,
         audio_source = audio_helpers.WaveSource(
             open(input_audio_file, 'rb'),
             sample_rate=audio_sample_rate,
-            sample_width=audio_sample_width
-        )
+            sample_width=audio_sample_width)
     else:
         audio_source = audio_device = (
             audio_device or audio_helpers.SoundDeviceStream(
-                sample_rate=audio_sample_rate,
-                sample_width=audio_sample_width,
-                block_size=audio_block_size,
-                flush_size=audio_flush_size
-            )
-        )
+            sample_rate=audio_sample_rate,
+            sample_width=audio_sample_width,
+            block_size=audio_block_size,
+            flush_size=audio_flush_size))
     if output_audio_file:
         audio_sink = audio_helpers.WaveSink(
             open(output_audio_file, 'wb'),
             sample_rate=audio_sample_rate,
-            sample_width=audio_sample_width
-        )
+            sample_width=audio_sample_width)
     else:
         audio_sink = audio_device = (
             audio_device or audio_helpers.SoundDeviceStream(
-                sample_rate=audio_sample_rate,
-                sample_width=audio_sample_width,
-                block_size=audio_block_size,
-                flush_size=audio_flush_size
-            )
-        )
+            sample_rate=audio_sample_rate,
+            sample_width=audio_sample_width,
+            block_size=audio_block_size,
+            flush_size=audio_flush_size))
     # Create conversation stream with the given audio source and sink.
     conversation_stream = audio_helpers.ConversationStream(
         source=audio_source,
@@ -380,11 +443,11 @@ def main(api_endpoint, credentials, project_id,
                 device = json.load(f)
                 device_id = device['id']
                 device_model_id = device['model_id']
-                logging.info("Using device model %s and device id %s",
+                logging.info('Using device model %s and device id %s',
                              device_model_id,
                              device_id)
         except Exception as e:
-            logging.warning('Device config not found: %s' % e)
+            logging.warning('Device config not found: %s', e)
             logging.info('Registering device')
             if not device_model_id:
                 logging.error('Option --device-model-id required '
@@ -394,10 +457,8 @@ def main(api_endpoint, credentials, project_id,
                 logging.error('Option --project-id required '
                               'when registering a device instance.')
                 sys.exit(-1)
-            device_base_url = (
-                'https://%s/v1alpha2/projects/%s/devices' % (api_endpoint,
-                                                             project_id)
-            )
+            device_base_url = ('https://%s/v1alpha2/projects/%s/devices' %
+                               (api_endpoint, project_id))
             device_id = str(uuid.uuid1())
             payload = {
                 'id': device_id,
@@ -405,8 +466,7 @@ def main(api_endpoint, credentials, project_id,
                 'client_type': 'SDK_SERVICE'
             }
             session = google.auth.transport.requests.AuthorizedSession(
-                credentials
-            )
+                credentials)
             r = session.post(device_base_url, data=json.dumps(payload))
             if r.status_code != 200:
                 logging.error('Failed to register device: %s', r.text)
@@ -418,6 +478,19 @@ def main(api_endpoint, credentials, project_id,
 
     device_handler = device_helpers.DeviceRequestHandler(device_id)
 
+    yutube_html_template = """
+    <!DOCTYPE html>
+      <html>
+        <body>
+           <iframe id="player" type="text/html" width="640" height="390"
+            src="http://www.youtube.com/embed/%s?enablejsapi=1&modestbranding=1&autohide=1&mute=1&showinfo=0&controls=0&autoplay=1"
+            frameborder="0"></iframe>
+        </body>"""
+    api_key = "" # TODO
+    custom_search = "" # TODO
+    image_search = ImageSearch(api_key, custom_search)
+    youtube = YouTubeSearchService(api_key)
+
     @device_handler.command('action.devices.commands.OnOff')
     def onoff(on):
         if on:
@@ -427,19 +500,18 @@ def main(api_endpoint, credentials, project_id,
 
     @device_handler.command('com.example.commands.BlinkLight')
     def blink(speed, number):
-        logging.info('Blinking device %s times.' % number)
+        logging.info('Blinking device %s times.', number)
         delay = 1
-        if speed == "SLOWLY":
+        if speed == 'SLOWLY':
             delay = 2
-        elif speed == "QUICKLY":
+        elif speed == 'QUICKLY':
             delay = 0.5
         for i in range(int(number)):
             logging.info('Device is blinking.')
             time.sleep(delay)
 
-    with SampleAssistant(lang, device_model_id, device_id,
-                         conversation_stream, display,
-                         grpc_channel, grpc_deadline,
+    with SampleAssistant(lang, device_model_id, device_id, conversation_stream,
+                         display, grpc_channel, grpc_deadline,
                          device_handler) as assistant:
         # If file arguments are supplied:
         # exit after the first turn of the conversation.
@@ -455,6 +527,12 @@ def main(api_endpoint, credentials, project_id,
         while True:
             if wait_for_user_trigger:
                 click.pause(info='Press Enter to send a new request...')
+
+            # After stopping the hotwordAssistant in assist() method it needs to
+            # be recreated.
+            hotwordAssistant = HotwordAssistant(device_model_id=device_model_id)
+            hotwordAssistant.assist()
+
             continue_conversation = assistant.assist()
             # wait for user trigger if there is no follow-up turn in
             # the conversation.
