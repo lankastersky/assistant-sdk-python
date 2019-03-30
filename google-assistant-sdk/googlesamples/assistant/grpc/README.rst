@@ -1,4 +1,10 @@
-**Forked from [google-assistant-sdk/googlesamples/assistant/grpc](https://github.com/googlesamples/assistant-sdk-python/tree/master/google-assistant-sdk/googlesamples/assistant/grpc)**
+Includes some experiments:
+---------------------------
+- hotword detection
+- image search requests
+- youtube requests
+
+-----------------------------------------------
 
 Assistant Library is used for hotword detection (see hotword_assistant.py) and Assistant Service is used to serve with help of Assistant NLU, device traits and custom device actions (see pushtotalk.py).
 
